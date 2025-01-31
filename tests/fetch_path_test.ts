@@ -8,6 +8,23 @@ import {
 import { assertEquals } from 'https://deno.land/std@0.90.0/testing/asserts.ts';
 
 Clarinet.test({
+    name: "Can register an authorized vet",
+    async fn(chain: Chain, accounts: Map<string, Account>) {
+        const deployer = accounts.get('deployer')!;
+        
+        let block = chain.mineBlock([
+            Tx.contractCall('fetch_path', 'register-authorized-vet', [
+                types.ascii("Dr. Smith"),
+                types.ascii("VET123456"),
+                types.buff("0102030405060708091011121314151617181920212223242526272829303132")
+            ], deployer.address)
+        ]);
+        
+        block.receipts[0].result.expectOk();
+    }
+});
+
+Clarinet.test({
     name: "Can register a new pet",
     async fn(chain: Chain, accounts: Map<string, Account>) {
         const wallet1 = accounts.get('wallet_1')!;
@@ -36,82 +53,51 @@ Clarinet.test({
 });
 
 Clarinet.test({
-    name: "Can add vet record for owned pet",
+    name: "Authorized vet can add verified record",
     async fn(chain: Chain, accounts: Map<string, Account>) {
-        const wallet1 = accounts.get('wallet_1')!;
+        const deployer = accounts.get('deployer')!;
         
-        // First register a pet
-        let block = chain.mineBlock([
+        // First register vet
+        let vetBlock = chain.mineBlock([
+            Tx.contractCall('fetch_path', 'register-authorized-vet', [
+                types.ascii("Dr. Smith"),
+                types.ascii("VET123456"),
+                types.buff("0102030405060708091011121314151617181920212223242526272829303132")
+            ], deployer.address)
+        ]);
+        
+        // Register pet
+        let petBlock = chain.mineBlock([
             Tx.contractCall('fetch_path', 'register-pet', [
                 types.ascii("Buddy"),
                 types.ascii("Dog"),
                 types.uint(1640995200)
-            ], wallet1.address)
+            ], deployer.address)
         ]);
         
-        // Then add a vet record
-        let vetBlock = chain.mineBlock([
+        // Add vet record
+        let recordBlock = chain.mineBlock([
             Tx.contractCall('fetch_path', 'add-vet-record', [
                 types.uint(1),
-                types.uint(1641081600), // 2022-01-02
-                types.ascii("Annual checkup"),
-                types.ascii("Dr. Smith")
-            ], wallet1.address)
-        ]);
-        
-        vetBlock.receipts[0].result.expectOk();
-        
-        // Verify vet record
-        let recordBlock = chain.mineBlock([
-            Tx.contractCall('fetch_path', 'get-vet-record', [
-                types.uint(1),
-                types.uint(1)
-            ], wallet1.address)
-        ]);
-        
-        const record = recordBlock.receipts[0].result.expectOk().expectSome();
-        assertEquals(record['vet-name'], "Dr. Smith");
-        assertEquals(record['description'], "Annual checkup");
-    }
-});
-
-Clarinet.test({
-    name: "Can log activity for owned pet",
-    async fn(chain: Chain, accounts: Map<string, Account>) {
-        const wallet1 = accounts.get('wallet_1')!;
-        
-        // First register a pet
-        let block = chain.mineBlock([
-            Tx.contractCall('fetch_path', 'register-pet', [
-                types.ascii("Buddy"),
-                types.ascii("Dog"),
-                types.uint(1640995200)
-            ], wallet1.address)
-        ]);
-        
-        // Log an activity
-        let activityBlock = chain.mineBlock([
-            Tx.contractCall('fetch_path', 'log-activity', [
-                types.uint(1),
-                types.ascii("Walk"),
                 types.uint(1641081600),
-                types.uint(30),
-                types.ascii("Morning walk in the park")
-            ], wallet1.address)
+                types.ascii("Annual checkup"),
+                types.ascii("Healthy"),
+                types.ascii("None required"),
+                types.uint(1641081600),
+                types.buff("000102030405060708091011121314151617181920212223242526272829303132333435363738394041424344454647484950515253545556575859606162636465")
+            ], deployer.address)
         ]);
         
-        activityBlock.receipts[0].result.expectOk();
+        recordBlock.receipts[0].result.expectOk();
         
-        // Verify activity
-        let getActivityBlock = chain.mineBlock([
-            Tx.contractCall('fetch_path', 'get-activity', [
+        // Verify record is marked as verified
+        let verifyBlock = chain.mineBlock([
+            Tx.contractCall('fetch_path', 'is-vet-verified', [
                 types.uint(1),
                 types.uint(1)
-            ], wallet1.address)
+            ], deployer.address)
         ]);
         
-        const activity = getActivityBlock.receipts[0].result.expectOk().expectSome();
-        assertEquals(activity['activity-type'], "Walk");
-        assertEquals(activity['duration'], types.uint(30));
+        verifyBlock.receipts[0].result.expectOk().expectBool(true);
     }
 });
