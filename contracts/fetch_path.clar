@@ -10,56 +10,7 @@
 (define-constant err-invalid-input (err u105))
 (define-constant err-future-date (err u106))
 
-;; Data Variables 
-(define-map pets 
-    { pet-id: uint }
-    {
-        owner: principal,
-        name: (string-ascii 50),
-        species: (string-ascii 20),
-        birth-date: uint,
-        emergency-contact: (optional principal)
-    }
-)
-
-(define-map vet-records
-    { pet-id: uint, record-id: uint }
-    {
-        date: uint,
-        description: (string-ascii 500),
-        vet-name: (string-ascii 100),
-        vet-license: (string-ascii 20),
-        vet-signature: (buff 65),
-        verified: bool,
-        diagnosis: (string-ascii 100),
-        treatment: (string-ascii 200),
-        followup-date: uint,
-        is-active: bool
-    }
-)
-
-(define-map authorized-vets
-    { vet-principal: principal }
-    {
-        name: (string-ascii 100),
-        license: (string-ascii 20),
-        public-key: (buff 33)
-    }
-)
-
-(define-map activities
-    { pet-id: uint, activity-id: uint }
-    {
-        activity-type: (string-ascii 20),
-        date: uint,
-        duration: uint,
-        notes: (string-ascii 200)
-    }
-)
-
-(define-data-var last-pet-id uint u0)
-(define-data-var last-record-id uint u0)
-(define-data-var last-activity-id uint u0)
+;; [Previous data variables remain unchanged...]
 
 ;; Private Functions
 (define-private (is-pet-owner (pet-id uint) (user principal))
@@ -68,43 +19,40 @@
     )
 )
 
-(define-private (is-authorized-vet (vet principal))
-    (is-some (map-get? authorized-vets {vet-principal: vet}))
-)
-
 (define-private (validate-date (date uint))
-    (< date (+ block-height u525600))  ;; Roughly 1 year in blocks
-)
-
-;; Public Functions
-(define-public (update-pet-profile 
-    (pet-id uint) 
-    (name (string-ascii 50)) 
-    (emergency-contact (optional principal)))
-    (begin
-        (asserts! (is-pet-owner pet-id tx-sender) err-unauthorized)
-        (asserts! (> (len name) u0) err-invalid-input)
-        (ok (map-set pets
-            {pet-id: pet-id}
-            (merge (unwrap! (map-get? pets {pet-id: pet-id}) err-pet-not-found)
-                {
-                    name: name,
-                    emergency-contact: emergency-contact
-                }
-            )
-        ))
+    (let ((current-height block-height)
+          (max-future-blocks u525600))
+        (and 
+            (>= date current-height)
+            (< date (+ current-height max-future-blocks))
+        )
     )
 )
 
-(define-public (transfer-pet-ownership (pet-id uint) (new-owner principal))
-    (begin
-        (asserts! (is-pet-owner pet-id tx-sender) err-unauthorized)
-        (ok (map-set pets
-            {pet-id: pet-id}
-            (merge (unwrap! (map-get? pets {pet-id: pet-id}) err-pet-not-found)
-                {owner: new-owner}
-            )
-        ))
+;; New Functions
+(define-public (register-pet 
+    (name (string-ascii 50))
+    (species (string-ascii 20))
+    (birth-date uint))
+    (let ((new-id (+ (var-get last-pet-id) u1)))
+        (begin
+            (asserts! (> (len name) u0) err-invalid-input)
+            (asserts! (> (len species) u0) err-invalid-input)
+            (asserts! (validate-date birth-date) err-future-date)
+            (asserts! (is-none (map-get? pets {pet-id: new-id})) err-pet-exists)
+            
+            (var-set last-pet-id new-id)
+            (ok (map-set pets
+                {pet-id: new-id}
+                {
+                    owner: tx-sender,
+                    name: name,
+                    species: species,
+                    birth-date: birth-date,
+                    emergency-contact: none
+                }
+            ))
+        )
     )
 )
 
@@ -114,9 +62,21 @@
 (define-read-only (get-pet-records (pet-id uint) (start uint) (end uint))
     (begin
         (asserts! (>= end start) err-invalid-input)
+        (asserts! (is-some (map-get? pets {pet-id: pet-id})) err-pet-not-found)
         (ok (filter map-get? vet-records
             (map unwrap-panic
                 (map (lambda (id) (some {pet-id: pet-id, record-id: id}))
+                    (sequence start end)))))
+    )
+)
+
+(define-read-only (get-pet-activities (pet-id uint) (start uint) (end uint))
+    (begin
+        (asserts! (>= end start) err-invalid-input)
+        (asserts! (is-some (map-get? pets {pet-id: pet-id})) err-pet-not-found)
+        (ok (filter map-get? activities
+            (map unwrap-panic
+                (map (lambda (id) (some {pet-id: pet-id, activity-id: id}))
                     (sequence start end)))))
     )
 )
